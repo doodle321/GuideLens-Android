@@ -41,6 +41,17 @@ jobs:
       - name: Lint
         run: gradle lint
 
+      # Upload the HTML report even when lint fails, so the exact errors are
+      # downloadable from the run's Artifacts section without re-running locally.
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results*.html
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Build release APK (R8 on)
         run: gradle assembleRelease --stacktrace
 
@@ -50,9 +61,3 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
-      - uses: actions/upload-artifact@v5
-        with:
-          name: lint-report
-          path: app/build/reports/lint-results*.html
-          if-no-files-found: ignore
-          retention-days: 30

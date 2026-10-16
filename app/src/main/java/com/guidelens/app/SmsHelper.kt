@@ -1,5 +1,6 @@
 package com.guidelens.app
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -32,6 +33,9 @@ object SmsHelper {
         ContextCompat.checkSelfPermission(context, android.Manifest.permission.SEND_SMS) ==
             PackageManager.PERMISSION_GRANTED
 
+    // Permission is runtime-guarded by canSendDirectly() above; lint cannot
+    // see through the helper, so the false-positive MissingPermission is suppressed.
+    @SuppressLint("MissingPermission")
     fun send(activity: Activity, contact: String, message: String): SendResult {
         if (contact.isBlank()) return SendResult.NoContact
         return if (canSendDirectly(activity)) {
