@@ -1,0 +1,160 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
+
+// Endpoints are build-time configurable for anyone self-hosting OSRM/Nominatim
+// (both public demo instances have strict usage policies):
+//   ./gradlew assembleRelease -Posrm.base=https://your.server -Pnominatim.base=... -Pcontact.email=you@example.org
+def osrmBase = (project.findProperty("osrm.base") ?: "https://routing.openstreetmap.de").toString().replaceAll('/$', "")
+def nominatimBase = (project.findProperty("nominatim.base") ?: "https://nominatim.openstreetmap.org").toString().replaceAll('/$', "")
+def contactEmail = (project.findProperty("contact.email") ?: "guidelens-dev@example.org").toString()
+
+android {
+    namespace 'com.guidelens.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.guidelens.app"
+        minSdk 26           // adaptive icons; 99%+ of active devices
+        targetSdk 35
+        versionCode 5
+        versionName "1.4.0"
+
+        buildConfigField "String", "OSRM_BASE", "\"${osrmBase}\""
+        buildConfigField "String", "NOMINATIM_BASE", "\"${nominatimBase}\""
+        buildConfigField "String", "NOMINATIM_CONTACT", "\"${contactEmail}\""
+        buildConfigField "String", "NOMINATIM_UA", "\"GuideLens/1.4.0 (${contactEmail})\""
+    }
+
+    buildFeatures { buildConfig true }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            minifyEnabled false
+        }
+    }
+
+    androidResources { noCompress 'tflite' }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    testOptions { unitTests.returnDefaultValues = true }
+}
+
+dependencies {
+    implementation libs.androidx.core.ktx
+    implementation libs.androidx.appcompat
+    implementation libs.google.material
+    implementation libs.camera.core
+    implementation libs.camera.camera2
+    implementation libs.camera.lifecycle
+    implementation libs.camera.view
+    implementation libs.tflite
+    implementation libs.mlkit.text
+    implementation libs.play.location
+    implementation libs.lifecycle.runtime
+    implementation libs.kotlinx.coroutines
+    testImplementation libs.junit
+}
+
+// ---- ML models ----
+// Prefer copying the committed models from your previous checkout into
+// app/src/main/assets/. This task is the safety net: it downloads, verifies
+// the TFL3 flatbuffer magic + minimum size, and — once you append real hashes
+// to app/models.sha256 — enforces pinned SHA-256 checksums (supply chain).
+tasks.register('downloadModels') {
+    def assetsDir = layout.projectDirectory.dir('src/main/assets')
+    outputs.dir assetsDir
+    doLast {
+        assetsDir.asFile.mkdirs()
+        def checks = [:]
+        def shaFile = layout.projectDirectory.file('models.sha256').asFile
+        if (shaFile.isFile()) {
+            shaFile.eachLine { line ->
+                def parts = line.trim().split(/\s+/)
+                if (parts.length == 2) checks[parts[1]] = parts[0].toLowerCase()
+            }
+        }
+        def hasTflMagic = { File f ->
+            if (f == null || !f.isFile() || f.length() < 8) return false
+            def fis = new FileInputStream(f)
+            try {
+                byte[] skip = new byte[4]; byte[] m = new byte[4]
+                if (fis.read(skip) != 4) return false
+                return fis.read(m) == 4 &&
+                    (m[0] & 0xFF) == 0x54 && (m[1] & 0xFF) == 0x46 &&
+                    (m[2] & 0xFF) == 0x4C && (m[3] & 0xFF) == 0x33
+            } finally { fis.close() }
+        }
+        def sha256 = { File f ->
+            def md = java.security.MessageDigest.getInstance('SHA-256')
+            f.eachByte(65536) { b, n -> md.update(b, 0, n) }
+            md.digest().encodeHex().toString()
+        }
+        def fetch = { name, urls, minBytes, required ->
+            def f = new File(assetsDir.asFile, name)
+            if (f.isFile() && f.length() > minBytes && hasTflMagic(f)) {
+                def want = checks[name]
+                if (want) {
+                    def actual = sha256(f)
+                    if (actual != want) {
+                        f.delete()
+                        throw new GradleException("$name failed pinned checksum verification (supply-chain guard).")
+                    }
+                }
+                println "Using $name (${f.length()} bytes)"
+                return
+            }
+            for (u in urls) {
+                def tmp = null
+                try {
+                    tmp = new File(assetsDir.asFile, name + '.part')
+                    new URL(u).withInputStream { i -> tmp.withOutputStream { o ->
+                        byte[] buf = new byte[65536]; int r
+                        while ((r = i.read(buf)) != -1) o.write(buf, 0, r)
+                    } }
+                    if (tmp.length() > minBytes && hasTflMagic(tmp)) {
+                        def want = checks[name]
+                        if (want && sha256(tmp) != want) {
+                            println "REJECTED $name from $u: checksum did not match models.sha256"
+                            tmp.delete(); tmp = null; continue
+                        }
+                        tmp.renameTo(f)
+                        println "Downloaded $name (${f.length()} bytes) from $u"
+                        println "SHA-256: ${sha256(f)}  -> pin it in app/models.sha256"
+                        return
+                    }
+                    println "Rejected download from $u (not a valid TFLite file)"
+                    tmp.delete(); tmp = null
+                } catch (Exception ex) {
+                    println "Download failed from $u: ${ex.message}"
+                    if (tmp != null) { tmp.delete() }
+                }
+            }
+            if (required && (!f.isFile() || !hasTflMagic(f))) {
+                throw new GradleException("Missing object-detection model app/src/main/assets/detect.tflite. " +
+                        "Copy it from your previous checkout or run tools/download-models.sh.")
+            }
+        }
+        fetch('detect.tflite', [
+            'https://cdn.jsdelivr.net/gh/am15h/object_detection_flutter@master/assets/detect.tflite',
+            'https://raw.githubusercontent.com/am15h/object_detection_flutter/master/assets/detect.tflite'
+        ], 1_000_000L, true)
+        fetch('deeplab_cityscapes.tflite', [
+            'https://raw.githubusercontent.com/google-coral/edgetpu/master/test_data/deeplabv3_mnv2_cityscapes_quant.tflite'
+        ], 1_000_000L, false)
+    }
+}
+
+preBuild.dependsOn 'downloadModels'

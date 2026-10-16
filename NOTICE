@@ -1,0 +1,10 @@
+GuideLens is MIT licensed (see LICENSE). Bundled machine-learning assets
+are NOT MIT:
+
+- detect.tflite: SSD MobileNet exported for the am15h/object_detection_flutter
+  sample; derived from the TensorFlow model zoo (Apache-2.0).
+- deeplab_cityscapes.tflite: DeepLabV3 MobileNetV2 trained on the Cityscapes
+  dataset. Cityscapes is released under non-commercial terms
+  (https://www.cityscapes-dataset.com/license/). Do not redistribute this
+  model in commercial products without checking that license.
+- OCR: ML Kit bundled model, subject to Google ML Kit terms.
