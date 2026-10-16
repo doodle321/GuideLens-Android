@@ -91,7 +91,7 @@
 
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
                     android:gravity="center" android:textSize="14sp" android:textColor="@color/text2"
-                    android:text="GuideLens — assistive navigation for blind and elderly users.&#10;Code on: https://github.com/doodle765/GuideLens-Test" />
+                    android:text="GuideLens — assistive navigation for blind and elderly users.&#10;Code on: https://github.com/doodle321/GuideLens-Android" />
             </LinearLayout>
 
             <!-- NAVIGATE -->
